@@ -1,0 +1,7 @@
+Requests==2.31.0
+numpy==1.26.4
+pandas==2.2.0
+pyarrow==15.0.0
+urllib3
+espn-api-orm>=0.0.8
+nfl-data-loader>=0.0.10
