@@ -1,13 +1,23 @@
-name: Odds Data trigger
-
+name: Player Odds Data trigger
 
 on:
   schedule:
-    - cron: '0 9 * * *' # runs at 9:00 UTC every Sunday (4AM EST)
+    # Aug–Dec (09:27 & 17:27 UTC)
+    - cron: '27 9  * 8-12 *'
+    - cron: '27 17 * 8-12 *'
+    # January (09:27 & 21:27 UTC)
+    - cron: '27 9  * 1 *'
+    - cron: '27 17 * 1 *'
+    # Feb 1–15 (09:27 & 21:27 UTC)
+    - cron: '27 9  1-15 2 *'
+    - cron: '27 17 1-15 2 *'
   workflow_dispatch:
 
+env:
+  ACTION_NETWORK_ACCESS_TOKEN: ${{ secrets.ACTION_NETWORK_ACCESS_TOKEN }}
+
 jobs:
-  event_data_trigger:
+  event_odds_data_trigger:
     runs-on: ubuntu-latest
     steps:
       - name: checkout repo content
@@ -20,8 +30,8 @@ jobs:
           cache: 'pip'
       - run: pip install -r requirements.txt
 
-      - name: Run Odds
-        run: python odds_runner.py
+      - name: Run Event Odds
+        run: python event_odds_runner.py
 
       - name: commit files
         run: |

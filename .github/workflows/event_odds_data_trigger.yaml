@@ -1,9 +1,13 @@
-name: Odds Data trigger
-
+name: Event Odds Data trigger
 
 on:
   schedule:
-    - cron: '0 9 * * *' # runs at 9:00 UTC every Sunday (4AM EST)
+    # Aug–Dec (daily @ 09:12 UTC)
+    - cron: '12 9 * 8-12 *'
+    # January (daily @ 09:12 UTC)
+    - cron: '12 9 * 1 *'
+    # Feb 1–15 (daily @ 09:12 UTC)
+    - cron: '12 9 1-15 2 *'
   workflow_dispatch:
 
 env:
