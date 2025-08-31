@@ -11,7 +11,8 @@ from espn_api_orm.league.api import ESPNLeagueAPI
 from nfl_data_loader.utils.utils import get_seasons_to_update, get_dataframe, find_year_for_season, find_week_for_season, put_dataframe
 
 from consts import ACTION_NETWORK_ID_MAPPER
-from src.action_props_runner import get_player_props, polite_sleep_block
+from src.action_props_runner import get_player_props
+from src.utils import polite_sleep_block
 
 load_dotenv()
 
