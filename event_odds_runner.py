@@ -10,7 +10,13 @@ from nfl_data_loader.utils.utils import (
     get_seasons_to_update, get_dataframe, put_dataframe,
     find_year_for_season, find_week_for_season,
 )
-from src.utils import polite_sleep_block  # reuse your jitter sleeper
+# top of file
+from src.utils import (
+    polite_sleep_block,
+    ensure_open_lines,              # (optional if you only call via merge)
+    keep_only_latest_per_book,
+    merge_with_existing_and_dedupe,
+)
 from src.action_games_runner import GameLinesClient  # <-- your class from prior message
 
 load_dotenv()
@@ -37,104 +43,6 @@ UNIQ_KEYS_NO_BOOK: List[str] = [k for k in UNIQ_KEYS_W_BOOK if k != "book_id"]
 DEFAULT_BOOK_IDS = [15, 30, 68, 69, 79]
 DEFAULT_PERIODS = ["event", "firsthalf", "secondhalf",
                    "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"]
-
-
-# --------------- OPEN (30) BACKFILL --------------- #
-def ensure_open_lines(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    If a group (ignoring book) lacks an OPEN (book_id=30), duplicate from the
-    first available in OPEN_FALLBACK_PRIORITY, tagging open_inferred/source.
-    """
-    if df.empty:
-        return df
-
-    df = df.copy()
-
-    # Types we depend on
-    for col in ("book_id", "event_id", "team_id", "season", "week"):
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Fast lookup by (group + book_id)
-    df_idx = df.set_index(UNIQ_KEYS_NO_BOOK + ["book_id"], drop=False)
-
-    rows_to_add = []
-    present_books_by_group = (
-        df.groupby(UNIQ_KEYS_NO_BOOK, dropna=False)["book_id"]
-          .apply(lambda s: set(pd.to_numeric(s, errors="coerce").dropna().astype(int)))
-    )
-    groups_missing_open = present_books_by_group[~present_books_by_group.apply(lambda s: OPEN_BOOK_ID in s)]
-
-    for group_key, _ in groups_missing_open.items():
-        chosen = None
-        for bid in OPEN_FALLBACK_PRIORITY:
-            try:
-                candidate = df_idx.loc[group_key + (bid,)]
-            except KeyError:
-                continue
-            # If multiples, keep latest by last_updated
-            if isinstance(candidate, pd.DataFrame):
-                candidate = candidate.sort_values("last_updated").iloc[-1]
-            chosen = candidate
-            break
-
-        if chosen is not None:
-            r = chosen.to_dict()
-            r["book_id"] = OPEN_BOOK_ID
-            r["open_inferred"] = True
-            r["open_source_book_id"] = int(chosen["book_id"]) if "book_id" in chosen else None
-            rows_to_add.append(r)
-
-    if rows_to_add:
-        add_df = pd.DataFrame(rows_to_add)
-        # align columns
-        for col in df.columns:
-            if col not in add_df.columns:
-                add_df[col] = pd.NA
-        df = pd.concat([df, add_df[df.columns]], ignore_index=True)
-
-    # flags on all rows
-    if "open_inferred" not in df.columns:
-        df["open_inferred"] = False
-    if "open_source_book_id" not in df.columns:
-        df["open_source_book_id"] = pd.NA
-    df["open_inferred"] = df["open_inferred"].fillna(False)
-
-    return df
-
-
-# --------------- DEDUPE: KEEP LATEST PER BOOK --------------- #
-def keep_only_latest_per_book(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    if "last_updated" not in df.columns:
-        df = df.assign(last_updated=pd.Timestamp("1970-01-01"))
-    return (
-        df.sort_values("last_updated")
-          .drop_duplicates(UNIQ_KEYS_W_BOOK, keep="last")
-          .reset_index(drop=True)
-    )
-
-
-def merge_with_existing_and_dedupe(current_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
-    new_df = ensure_open_lines(new_df)
-
-    # guard columns
-    for col in UNIQ_KEYS_W_BOOK + ["last_updated", "open_inferred", "open_source_book_id"]:
-        if col not in new_df.columns:
-            new_df[col] = pd.NA
-
-    if current_df is None or current_df.empty:
-        combined = new_df
-    else:
-        # align schemas
-        for col in set(new_df.columns) - set(current_df.columns):
-            current_df[col] = pd.NA
-        for col in set(current_df.columns) - set(new_df.columns):
-            new_df[col] = pd.NA
-        combined = pd.concat([current_df[new_df.columns], new_df[current_df.columns]], ignore_index=True)
-
-    return keep_only_latest_per_book(combined)
 
 
 # --------------- FETCH ONE WEEK OF GAME LINES --------------- #
@@ -289,7 +197,14 @@ if __name__ == "__main__":
                 current_df = get_dataframe(weekly_path)
 
                 # Fill OPEN (30) + dedupe latest per book
-                merged_week_df = merge_with_existing_and_dedupe(current_df, df)
+                merged_week_df = merge_with_existing_and_dedupe(
+                    current_df, df,
+                    uniq_keys_with_book=UNIQ_KEYS_W_BOOK,
+                    open_book_id=OPEN_BOOK_ID,
+                    fallback_priority=OPEN_FALLBACK_PRIORITY,
+                    protect_open=True,
+                    prefer_real_open=False,
+                )
 
                 # Save weekly
                 put_dataframe(merged_week_df, weekly_path)
@@ -303,8 +218,17 @@ if __name__ == "__main__":
             # Season rollup (already deduped weekly; dedupe again just in case)
             if season_rows:
                 season_df = pd.concat(season_rows, ignore_index=True)
-                season_df = keep_only_latest_per_book(season_df)
-                season_df = merge_with_existing_and_dedupe(processed_df, season_df)
+                season_df = keep_only_latest_per_book(
+                    season_df, UNIQ_KEYS_W_BOOK
+                )
+                season_df = merge_with_existing_and_dedupe(
+                    processed_df, season_df,
+                    uniq_keys_with_book=UNIQ_KEYS_W_BOOK,
+                    open_book_id=OPEN_BOOK_ID,
+                    fallback_priority=OPEN_FALLBACK_PRIORITY,
+                    protect_open=True,
+                    prefer_real_open=False,
+                )
 
                 os.makedirs(processed_path, exist_ok=True)
                 put_dataframe(season_df, processed_season_path)
