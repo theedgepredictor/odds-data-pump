@@ -12,9 +12,9 @@ from nfl_data_loader.api.sources.players.rosters.rosters import collect_roster
 from nfl_data_loader.schemas.players.position import POSITION_MAPPER
 from nfl_data_loader.utils.formatters.general import df_rename_fold
 from nfl_data_loader.utils.formatters.reformat_team_name import team_id_repl
+from nfl_data_loader.utils.utils import clean_player_names
 
 from consts import ACTION_NETWORK_ID_MAPPER
-from src.utils import clean_player_names
 
 MY_LINES = {
     15: "CONSENSUS",
